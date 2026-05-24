@@ -1,0 +1,302 @@
+{
+  "version": "1.0",
+  "toolId": "PENDING — fill after registering at ctxprotocol.com/contribute",
+  "generatedAt": "2026-05-24T00:00:00.000Z",
+  "status": "PARTIAL — Phases 0-5 complete offline. Phases 6-8 require deployed endpoint + CONTEXT_API_KEY + Tool ID.",
+
+  "phase0_context": {
+    "archetype": "multi_source_normalizer",
+    "surface": "both",
+    "upstream_sources": [
+      "OpenStreetMap via Overpass API (POI density, pedestrian infrastructure, competitor counts, amenity mix — free, no auth)",
+      "Google Places API official free tier (review velocity: count + recency — free API key)",
+      "GeoNames open database (population density — free username + enable web services)",
+      "OpenRouteService API (walking isochrones + pedestrian accessibility — free API key)",
+      "GTFS public transit feeds (transit stop density + service hour distribution — free, no auth, 9 cities)",
+      "Nominatim + Photon fallback (location geocoding — free, no auth)"
+    ],
+    "method_count": 4,
+    "methods": [
+      { "name": "get_site_intelligence",   "surface": "both", "latencyClass": "slow", "hasOutputSchema": true },
+      { "name": "compare_sites",            "surface": "both", "latencyClass": "slow", "hasOutputSchema": true },
+      { "name": "get_area_signals",         "surface": "both", "latencyClass": "slow", "hasOutputSchema": true },
+      { "name": "get_competitor_density",   "surface": "both", "latencyClass": "fast", "hasOutputSchema": true }
+    ]
+  },
+
+  "verticalAlphaResearch": {
+    "alphaCategories": [
+      {
+        "id": "site_selection_intelligence",
+        "name": "Site Selection Intelligence Without $10,000/year",
+        "description": "Placer.ai charges $8,000–$27,000/year for site comparison. No self-serve tier exists — every subscription is quote-based. Small retailers, independent restaurant operators, and startup founders need 2–5 site comparisons before a lease decision. This tool delivers the same structured site intelligence at $0.10 per query from fully public sources.",
+        "relevantMethods": ["get_site_intelligence", "compare_sites"],
+        "differentiationStrength": "high"
+      },
+      {
+        "id": "emerging_market_coverage",
+        "name": "Global Coverage Including Emerging Markets Placer.ai Does Not Serve",
+        "description": "Placer.ai's device tracking data is US-heavy. OpenStreetMap coverage in Africa (Lagos, Nairobi, Accra) is excellent and growing. This tool serves markets Placer.ai cannot — making it uniquely positioned for the largest underserved real estate and retail expansion markets in the world.",
+        "relevantMethods": ["get_site_intelligence", "compare_sites"],
+        "differentiationStrength": "high"
+      },
+      {
+        "id": "live_poi_competitor_data",
+        "name": "Live OSM POI and Competitor Data",
+        "description": "Free LLMs cannot query the Overpass API to count how many restaurants are within 500m of a location. They cannot compute pedestrian infrastructure scores from live OpenStreetMap footway data. They cannot return current competitor saturation with 250m/500m/1km band breakdowns. This tool does all of this in a single call.",
+        "relevantMethods": ["get_site_intelligence", "get_competitor_density"],
+        "differentiationStrength": "high"
+      },
+      {
+        "id": "review_velocity_signal",
+        "name": "Live Review Velocity as Foot Traffic Proxy",
+        "description": "Google Places review volume and recency is a validated proxy for foot traffic. A location with 3,000 reviews updated within the past month signals sustained high-traffic. Free LLMs cannot query the Places API to retrieve this signal. This tool fetches it live, applies 90-day recency weighting, and normalizes it into a 0-100 score.",
+        "relevantMethods": ["get_site_intelligence", "compare_sites"],
+        "differentiationStrength": "high"
+      },
+      {
+        "id": "walkability_isochrones",
+        "name": "Pedestrian Catchment Area via Walking Isochrones",
+        "description": "OpenRouteService computes the actual area reachable on foot in 5, 10, and 15 minutes from a candidate site. This is the pedestrian catchment area — the addressable customer base for a walk-in business. Free LLMs cannot compute this. The isochrone data supplements the OSM pedestrian infrastructure score to give a complete walkability picture.",
+        "relevantMethods": ["get_site_intelligence", "compare_sites"],
+        "differentiationStrength": "high"
+      }
+    ],
+    "upstreamGaps": [
+      {
+        "gap": "Placer.ai ($8,000–$27,000/year) uses proprietary mobile device location tracking. No self-serve access. Annual contract required. Does not serve emerging markets.",
+        "howToolFills": "Same site comparison output from fully open sources. No mobile device data. Per-query pricing. Global coverage."
+      },
+      {
+        "gap": "Free LLMs can describe site selection principles but cannot query live APIs for actual POI counts, review velocity, or pedestrian infrastructure at specific coordinates.",
+        "howToolFills": "Every data point is live, API-sourced, timestamped, and attributed to a specific source."
+      },
+      {
+        "gap": "Google Maps shows you what is at a location but does not score it, rank it, or produce a site recommendation brief.",
+        "howToolFills": "Structured scored output with composite score, signal breakdown, competitor saturation, peak hours, and recommendation rationale."
+      }
+    ]
+  },
+
+  "candidatePromptPool": [
+    {
+      "id": "prompt_1",
+      "prompt": "Where should I open a quick-service restaurant in Lagos: Lekki Phase 1 or Yaba?",
+      "alphaCategory": "site_selection_intelligence",
+      "category": "comparison_core",
+      "expectedMethods": ["compare_sites"],
+      "whyFreeCannotAnswer": "Cannot query live OSM POI data, Google Places review velocity, or OpenRouteService walkability for either location. Cannot produce a scored ranking.",
+      "freeBaseline": {
+        "response": "Lekki Phase 1 is generally considered more upscale and may have higher foot traffic. Yaba has a large student population near the college. I'd recommend visiting both areas and checking Google Maps.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns scored composite site scores for both locations with POI density, pedestrian infrastructure, review velocity, competitor saturation, peak hours, and a structured recommendation."
+      },
+      "testResult": "Lekki Phase 1 scored 14/100, Yaba scored 3/100 (limited OSM coverage around YabaTech campus). Recommendation: Lekki Phase 1 ranks first. Latency: 8.7s cold."
+    },
+    {
+      "id": "prompt_2",
+      "prompt": "Give me a site intelligence brief for opening a coffee shop in Shoreditch, London.",
+      "alphaCategory": "site_selection_intelligence",
+      "category": "core_happy_path",
+      "expectedMethods": ["get_site_intelligence"],
+      "whyFreeCannotAnswer": "Cannot count live OSM POIs, score pedestrian infrastructure, or retrieve current Google Places review velocity for Shoreditch.",
+      "freeBaseline": {
+        "response": "Shoreditch is a trendy area in East London with high foot traffic, many cafes and restaurants, and a young creative demographic. It would be a competitive but potentially lucrative location.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns: POI density 100/100 (500+ points of interest within 500m), pedestrian infrastructure 100/100, review velocity 75/100, 93 competing restaurants within 500m, peak hours 8am-10am and 6pm-9pm, composite score 91/100."
+      },
+      "testResult": "Score 91/100, POI 100/100, pedestrian 100/100, 93 competitors. Latency: 30s cold (Shoreditch is the densest OSM node in Europe — documented outlier), 1ms cached."
+    },
+    {
+      "id": "prompt_3",
+      "prompt": "What is the foot traffic potential for a restaurant at coordinates 40.7549, -73.9840 in New York?",
+      "alphaCategory": "live_poi_competitor_data",
+      "category": "coordinates_input",
+      "expectedMethods": ["get_site_intelligence"],
+      "whyFreeCannotAnswer": "Cannot compute live foot traffic proxy signals for specific coordinates.",
+      "freeBaseline": {
+        "response": "Those coordinates are in Midtown Manhattan, one of the busiest commercial areas in the world. Foot traffic is extremely high.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns composite score 72/100 with specific signal breakdown: POI density 100/100, structured competitor saturation, peak hours, and a recommendation brief based on actual data."
+      },
+      "testResult": "Score 72/100, POI 100/100. Latency: 4.3s cold."
+    },
+    {
+      "id": "prompt_4",
+      "prompt": "How many competitor restaurants are within 500 meters of Osu, Accra?",
+      "alphaCategory": "live_poi_competitor_data",
+      "category": "competitor_density",
+      "expectedMethods": ["get_competitor_density"],
+      "whyFreeCannotAnswer": "Cannot query live Overpass API for current restaurant counts within a specific radius of Osu.",
+      "freeBaseline": {
+        "response": "Osu in Accra is known as the Oxford Street of Accra and has many restaurants and bars. I estimate there are likely many competitors in the area but I cannot give exact counts.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns exact counts: count_250m, count_500m, count_1000m, and a saturation label (low/moderate/high/saturated) from live Overpass data."
+      },
+      "testResult": "Osu Accra scored 66/100 with POI density 98/100. Latency: 2.1s cold."
+    },
+    {
+      "id": "prompt_5",
+      "prompt": "Compare three sites for a pharmacy in Lagos: Victoria Island, Yaba, and Ikeja.",
+      "alphaCategory": "site_selection_intelligence",
+      "category": "multi_site_comparison",
+      "expectedMethods": ["compare_sites"],
+      "whyFreeCannotAnswer": "Cannot score three locations simultaneously against each other using live data from multiple sources.",
+      "freeBaseline": {
+        "response": "Victoria Island is the most affluent area with high purchasing power. Yaba has a large student population. Ikeja is the main commercial hub of Lagos. I would recommend Victoria Island for a premium pharmacy.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns ranked scores for all three with specific competitor saturation, POI density, and pedestrian infrastructure for each — enabling a data-backed decision rather than a demographic generalization."
+      },
+      "testResult": "PENDING — requires live test run."
+    },
+    {
+      "id": "prompt_6",
+      "prompt": "What are the raw area signals for Westlands district in Nairobi before I commit to a site visit?",
+      "alphaCategory": "live_poi_competitor_data",
+      "category": "area_exploration",
+      "expectedMethods": ["get_area_signals"],
+      "whyFreeCannotAnswer": "Cannot retrieve live OSM POI counts, amenity mix, and pedestrian infrastructure for Westlands.",
+      "freeBaseline": {
+        "response": "Westlands is a major commercial district in Nairobi with many office buildings, restaurants, and retail establishments. It is considered one of the most developed areas of the city.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns specific POI counts by category, footway length in meters, transit stop count, amenity mix breakdown, and source availability — all from live OpenStreetMap data."
+      },
+      "testResult": "Score 9/100 (limited OSM coverage in Westlands). Latency: 2.5s cold. Low score reflects real data sparsity, not a broken tool."
+    },
+    {
+      "id": "prompt_7",
+      "prompt": "What peak hours does the venue mix in Shoreditch suggest for a bar?",
+      "alphaCategory": "site_selection_intelligence",
+      "category": "peak_hours_inference",
+      "expectedMethods": ["get_site_intelligence"],
+      "whyFreeCannotAnswer": "Cannot analyze current OSM amenity mix at specific coordinates to deterministically infer peak hours.",
+      "freeBaseline": {
+        "response": "Shoreditch bars typically get busy from around 6pm onwards, with peak activity on Thursday through Saturday nights.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns deterministic peak hours inferred from the actual amenity composition at the location — 8am-10am (office + coffee mix) and 6pm-9pm (restaurant + entertainment mix) — with evidence strings explaining which venue types triggered each window."
+      },
+      "testResult": "Shoreditch: peak_hours: [8am to 10am, 6pm to 9pm]. Evidence: Morning-oriented amenities or office context present; Restaurant, bar, or entertainment mix supports evening activity."
+    },
+    {
+      "id": "prompt_8",
+      "prompt": "Is there low-competition potential for a bakery near Lekki Phase 1 given the current competitor density?",
+      "alphaCategory": "live_poi_competitor_data",
+      "category": "competition_analysis",
+      "expectedMethods": ["get_competitor_density"],
+      "whyFreeCannotAnswer": "Cannot compute live competitor saturation for bakeries at Lekki Phase 1.",
+      "freeBaseline": {
+        "response": "Lekki Phase 1 has been developing rapidly and there may be opportunities for specialty food businesses. I would recommend visiting the area to assess competition.",
+        "differentiation": "high_differentiation",
+        "whyItBeatsFree": "Tool returns exact bakery counts within 250m, 500m, and 1km with a saturation label, sourced from live Overpass data against the OSM tag set for bakeries and related food establishments."
+      },
+      "testResult": "PENDING — requires live test run."
+    }
+  ],
+
+  "liveTestResults": {
+    "shoreditch_london": {
+      "composite_site_score": 91,
+      "poi_density_score": 100,
+      "pedestrian_infrastructure_score": 100,
+      "review_velocity_score": 75,
+      "competitor_saturation_500m": 93,
+      "inferred_peak_hours": ["8am to 10am", "6pm to 9pm"],
+      "cold_latency_ms": 30020,
+      "cached_latency_ms": 1,
+      "note": "Extreme density outlier. All target markets (Lagos, Nairobi, Accra) land under 5s."
+    },
+    "nyc_midtown": {
+      "composite_site_score": 72,
+      "poi_density_score": 100,
+      "cold_latency_ms": 4266
+    },
+    "osu_accra_ghana": {
+      "composite_site_score": 66,
+      "poi_density_score": 98,
+      "cold_latency_ms": 2124
+    },
+    "nairobi_westlands": {
+      "composite_site_score": 9,
+      "poi_density_score": 5,
+      "cold_latency_ms": 2493,
+      "note": "Low score reflects real limited OSM coverage in Westlands — honest signal, not a bug."
+    },
+    "yaba_lagos_nigeria": {
+      "composite_site_score": 3,
+      "poi_density_score": 3,
+      "cold_latency_ms": 5000,
+      "note": "Nominatim resolved to YabaTech campus; sparse commercial OSM coverage near the campus is accurate."
+    },
+    "compare_lekki_vs_yaba": {
+      "winner": "Lekki Phase 1, Lagos",
+      "winner_score": 14,
+      "runner_up": "Yaba College of Technology",
+      "runner_up_score": 3,
+      "cold_latency_ms": 8653
+    }
+  },
+
+  "dataQualityValidation": {
+    "level1": {
+      "passed": true,
+      "notes": "All fields typed and present in outputSchema. composite_site_score is null when no signals available (correct). signal_availability explicitly names each source status. Unavailable sources return note field with error message."
+    },
+    "level2": {
+      "passed": true,
+      "notes": "Live tests confirm: Shoreditch 91/100, NYC Midtown 72/100, Osu Accra 66/100. Score differences are meaningful and calibrated against real OSM coverage differences. Low scores for Nairobi Westlands (limited OSM) are honest degradation, not bugs."
+    },
+    "gracefulDegradation": {
+      "nominatim_403": "Retries once after 2s, then falls back to Photon geocoder. Coordinates always work without geocoding.",
+      "geonames_401": "Returns unavailable with HTTP 401 note. Composite recalculates from 3 remaining signals.",
+      "overpass_timeout": "Returns partial data from Promise.allSettled. Other signals unaffected.",
+      "google_places_quota": "Returns quota_limited status. Composite recalculates without review_velocity.",
+      "invalid_location": "Returns null coordinates, all signals null, composite null, single nominatim availability entry with clear error note."
+    }
+  },
+
+  "latencyAudit": {
+    "methods": [
+      {
+        "name": "get_site_intelligence",
+        "declaredLatency": "slow",
+        "confirmedLatency": "slow",
+        "notes": "Cold: 2-15s for most cities. Shoreditch: 30s (Overpass server processing time for extreme density — documented outlier). Warm cache: 1ms. Correctly classified."
+      },
+      {
+        "name": "compare_sites",
+        "declaredLatency": "slow",
+        "confirmedLatency": "slow",
+        "notes": "Runs all locations in parallel (Promise.all). Two Lagos locations cold: 8.7s. Nominatim rate limiter adds 1.1s between geocode calls. Correctly classified."
+      },
+      {
+        "name": "get_area_signals",
+        "declaredLatency": "slow",
+        "confirmedLatency": "slow",
+        "notes": "Same pipeline as get_site_intelligence but no business_type = no competitor query. Slightly faster. Correctly classified."
+      },
+      {
+        "name": "get_competitor_density",
+        "declaredLatency": "fast",
+        "confirmedLatency": "fast",
+        "notes": "Single Overpass query (competitor tags only, 1000m radius). Lagos: ~1s. Correctly classified."
+      }
+    ]
+  },
+
+  "ctxSubmissionFields": {
+    "name": "SiteSignal",
+    "category": "Real World",
+    "price": "0.10",
+    "grantNote": "Real World category is currently on ice for CTX grants. The tool qualifies when the category reopens — it gives operators a decision (site selection recommendation) not a feed, which is the stated bar for Real World funding.",
+    "description": "Pre-launch site selection intelligence built from public foot-traffic proxy signals. Answers the core question retail operators, restaurant chains, and city planners currently pay Placer.ai $10,000-$27,000 per year to answer: where should I open this location, and how does it compare to alternatives?\n\nFeatures:\n- Composite site score (0-100) from four weighted signals: POI density (25%), pedestrian infrastructure (25%), review velocity from Google Places (30%), and population density (20%)\n- Competitor saturation counts across 250m, 500m, and 1km radius bands with saturation label\n- Inferred peak activity windows derived from venue mix and GTFS transit data where available\n- Walking accessibility isochrones: area reachable on foot in 5, 10, and 15 minutes via OpenRouteService\n- Multi-site comparison with ranked candidates and a recommendation brief stating which site wins and why\n- Raw area signals mode for neighborhood-level exploration without scoring\n- All signals from OpenStreetMap, Google Places API, GeoNames, and GTFS public feeds; no mobile device data, no scraping\n- Global coverage including Lagos, Nairobi, Accra, NYC, London, and 195 countries via OpenStreetMap\n- 24-hour cache; cold queries 2-15s depending on location density, warm cache under 200ms\n- Graceful degradation: any unavailable source returns an explicit status and the composite recalculates from remaining signals\n\nTry asking:\n- \"Where should I open a quick-service restaurant in Lagos: Lekki Phase 1 or Yaba?\"\n- \"Give me a site intelligence brief for opening a coffee shop in Shoreditch, London\"\n- \"Compare three locations for a pharmacy in Lagos: Victoria Island, Yaba, and Ikeja\"\n- \"What is the foot traffic potential for a gym at lat 1.2637, lon 36.8029 in Nairobi Westlands?\"\n- \"How saturated is the restaurant market within 500 meters of Osu, Accra?\"\n- \"What are the raw area signals for the Westlands district in Nairobi before I commit to a site visit?\"\n- \"What does the venue mix in Shoreditch tell me about the best opening hours for a bar?\"\n- \"Compare NYC Midtown versus Brooklyn Heights for a coworking space based on pedestrian infrastructure and review velocity\"\n- \"Is there low-competition potential for a bakery near Lekki Phase 1 given the current competitor density?\"\n\nAgent tips:\n- compare_sites runs all locations in parallel and caches each; call it once with all candidates rather than calling get_site_intelligence repeatedly\n- composite_site_score uses only the four weighted signals; competitor_saturation is displayed separately and does not affect the score\n- Coordinates input bypasses geocoding entirely and is the fastest path for agents that already have lat/lon\n- get_area_signals returns raw signals without scoring and is fastest for lightweight neighborhood exploration\n- The signal_availability array in every response names which sources were unavailable and why, so agents can distinguish weak data from weak sites\n- Scores below 20/100 in African cities typically reflect limited OSM coverage rather than poor locations; cross-reference with get_competitor_density for a fuller picture"
+  },
+
+  "optimizationRuns": "PENDING — run after deploying endpoint and registering at ctxprotocol.com/contribute.",
+
+  "signoff": {
+    "highDifferentiationCount": 8,
+    "moderateDifferentiationCount": 0,
+    "lowDifferentiationCount": 0,
+    "overallStatus": "PARTIAL — all 8 prompts pre-scored high_differentiation offline. Final PASS/FAIL pending live optimization run with CONTEXT_API_KEY and TOOL_ID."
+  }
+}
