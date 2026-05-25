@@ -152,8 +152,23 @@ export class AreaSignalCollector {
       };
     }
 
-    // Geocode the location name with caching
-    const query    = location as string;
+    // Geocode the location name with caching.
+    // Guard: if a coordinates object slips through resolveCoordinates (Zod
+    // union edge cases), fail clearly rather than crashing in geocodeCacheKey.
+    if (typeof location !== "string") {
+      return {
+        coordinates: null,
+        label: JSON.stringify(location),
+        geocodeAvailability: {
+          source:       "nominatim" as const,
+          status:       "unavailable" as const,
+          last_updated: now,
+          expires_at:   null,
+          note:         `Expected string location, received ${typeof location}`,
+        },
+      };
+    }
+    const query    = location;
     const geoKey   = geocodeCacheKey(query);
     const geoCache = this.cache.get<LocationResolution>(geoKey, "nominatim");
 
@@ -210,9 +225,19 @@ export class AreaSignalCollector {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function locationLabel(location: string | { lat: number; lon: number }): string {
+// locationLabel accepts unknown because the MCP SDK passes raw JSON without
+// Zod validation — location may be a number, partial object, or other garbage.
+function locationLabel(location: unknown): string {
   if (typeof location === "string") return location;
-  return `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}`;
+  if (typeof location === "object" && location !== null) {
+    const obj = location as Record<string, unknown>;
+    const lat  = obj["lat"];
+    const lon  = obj["lon"];
+    if (typeof lat === "number" && typeof lon === "number") {
+      return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    }
+  }
+  return String(location);
 }
 
 function emptySignals(

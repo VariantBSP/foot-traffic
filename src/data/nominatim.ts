@@ -153,10 +153,14 @@ export async function geocodeLocation(
 }
 
 export function resolveCoordinates(
-  location: string | { lat: number; lon: number },
+  location: unknown,
 ): { lat: number; lon: number } | null {
-  if (typeof location === "object" && "lat" in location && "lon" in location) {
-    return { lat: location.lat, lon: location.lon };
+  if (typeof location !== "object" || location === null) return null;
+  const obj = location as Record<string, unknown>;
+  const lat  = obj["lat"];
+  const lon  = obj["lon"];
+  if (typeof lat === "number" && typeof lon === "number" && isFinite(lat) && isFinite(lon)) {
+    return { lat, lon };
   }
   return null;
 }

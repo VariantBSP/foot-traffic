@@ -13,7 +13,7 @@ export interface DataSourceConfig {
 
 export function loadDataSourceConfig(): DataSourceConfig {
   return {
-    cacheDbPath:            process.env["CACHE_DB_PATH"]            ?? "./data/cache.sqlite",
+    cacheDbPath:            process.env["CACHE_DB_PATH"]           ?? `${process.env.RAILWAY_VOLUME_MOUNT_PATH ?? "./data"}/cache.sqlite`,
     googlePlacesApiKey:     process.env["GOOGLE_PLACES_API_KEY"]   ?? null,
     geonamesUsername:       process.env["GEONAMES_USERNAME"]        ?? null,
     openRouteServiceApiKey: process.env["OPENROUTESERVICE_API_KEY"] ?? null,

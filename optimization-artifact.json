@@ -1,8 +1,7 @@
 {
   "version": "1.0",
-  "toolId": "PENDING — fill after registering at ctxprotocol.com/contribute",
+  "toolId": "c4d45184-79e4-4ed4-b624-39c1b45874d5",
   "generatedAt": "2026-05-24T00:00:00.000Z",
-  "status": "PARTIAL — Phases 0-5 complete offline. Phases 6-8 require deployed endpoint + CONTEXT_API_KEY + Tool ID.",
 
   "phase0_context": {
     "archetype": "multi_source_normalizer",

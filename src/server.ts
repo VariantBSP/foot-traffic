@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-// import { createContextMiddleware } from "@ctxprotocol/sdk";
+import { createContextMiddleware } from "@ctxprotocol/sdk";
 import { SignalCache, loadDataSourceConfig } from "./data/index.js";
 import { SiteSignalToolService } from "./mcp/service.js";
 import {
@@ -11,13 +11,12 @@ import {
   GET_COMPETITOR_DENSITY_OUTPUT_SCHEMA,
   GET_SITE_INTELLIGENCE_OUTPUT_SCHEMA,
 } from "./mcp/output-schemas.js";
-import type {
-  GetSiteIntelligenceInput,
-  CompareSitesInput,
-  GetAreaSignalsInput,
-  GetCompetitorDensityInput,
+import {
+  type GetSiteIntelligenceInput,
+  type CompareSitesInput,
+  type GetAreaSignalsInput,
+  type GetCompetitorDensityInput,
 } from "./mcp/schemas.js";
-import { createContextMiddleware } from "@ctxprotocol/sdk";
 
 // ── Logger ─────────────────────────────────────────────────────────────────
 
@@ -28,62 +27,229 @@ const log = {
 };
 
 // ── Shared service instance ────────────────────────────────────────────────
-// One service → one SQLite connection → cache shared across all requests.
 
 const service = new SiteSignalToolService();
 
-// ── Tool definitions for tools/list ───────────────────────────────────────
+// ── Shared input schema fragments ──────────────────────────────────────────
+
+const LOCATION_SCHEMA = {
+  oneOf: [
+    {
+      type: "string",
+      minLength: 1,
+      description:
+        'A place name, address, neighbourhood, or district string. Examples: "Lekki Phase 1, Lagos", "Westlands, Nairobi", "Osu, Accra, Ghana", "NYC Midtown". Use this for named locations.',
+      examples: [
+        "Lekki Phase 1, Lagos",
+        "Yaba, Lagos, Nigeria",
+        "Westlands, Nairobi",
+        "Osu, Accra, Ghana",
+        "Shoreditch, London",
+        "NYC Midtown",
+      ],
+    },
+    {
+      type: "object",
+      description:
+        'Coordinates as an object with lat and lon number properties. Example: {"lat": 6.4317, "lon": 3.4823}. Both fields are required. Do NOT pass a bare number — a single number cannot identify a location.',
+      properties: {
+        lat: { type: "number", minimum: -90,  maximum: 90,  description: "Latitude"  },
+        lon: { type: "number", minimum: -180, maximum: 180, description: "Longitude" },
+      },
+      required: ["lat", "lon"],
+      additionalProperties: false,
+      examples: [
+        { lat: 6.4317, lon: 3.4823 },
+        { lat: 51.5246, lon: -0.0765 },
+        { lat: 40.7549, lon: -73.9840 },
+      ],
+    },
+  ],
+};
+
+const RADIUS_SCHEMA = {
+  type: "integer",
+  minimum: 100,
+  maximum: 5000,
+  default: 500,
+  description:
+    "Search radius in metres. Default 500. Use 250–300 for walk-in retail. Use 1000–2000 for destination businesses.",
+};
+
+const BUSINESS_TYPE_SCHEMA = {
+  type: "string",
+  minLength: 1,
+  description:
+    'Business category used for competitor counting from OpenStreetMap. Examples: "restaurant", "cafe", "gym", "pharmacy", "supermarket", "bar", "bakery".',
+  examples: ["restaurant", "cafe", "gym", "pharmacy", "supermarket", "bar", "bakery"],
+};
+
+// ── Tool definitions ───────────────────────────────────────────────────────
 
 const TOOLS = [
   {
-    name:        "get_site_intelligence",
-    description: "Return scored public foot-traffic proxy signals for one candidate site and business type.",
+    name: "get_site_intelligence",
+    description: [
+      "Full scored site intelligence brief for one candidate location and business type.",
+      "Returns: composite site score (0-100) from POI density (25%), pedestrian infrastructure (25%),",
+      "review velocity from Google Places (30%), and population density (20%).",
+      "Also returns competitor saturation counts at 250m/500m/1km, inferred peak activity windows,",
+      "walking isochrones for 5/10/15-minute catchment areas, and a plain-language recommendation brief.",
+      "Replaces Placer.ai ($10,000–$27,000/year) for pre-lease site selection decisions.",
+      "Cold: 2–15s. Warm cache: under 200ms.",
+    ].join(" "),
+    examples: [
+      { input: { location: "Lekki Phase 1, Lagos", business_type: "restaurant", radius_meters: 500 } },
+      { input: { location: { lat: 51.5246, lon: -0.0765 }, business_type: "cafe", radius_meters: 300 } },
+    ],
+    _meta: {
+      surface: "both",
+      queryEligible: true,
+      latencyClass: "slow",
+      pricing: { executeUsd: "0.0010" },
+      rateLimit: {
+        maxRequestsPerMinute: 20,
+        cooldownMs: 2000,
+        maxConcurrency: 3,
+        notes: "Cold fetches hit Overpass, Google Places, GeoNames, and OpenRouteService in parallel. 2–15s cold, under 200ms warm (24h TTL cache).",
+      },
+    },
     inputSchema: {
       type: "object",
       properties: {
-        location:      { oneOf: [{ type: "string", minLength: 1 }, { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] }] },
-        business_type: { type: "string", minLength: 1 },
-        radius_meters: { type: "integer", minimum: 100, maximum: 5000, default: 500 },
+        location:      LOCATION_SCHEMA,
+        business_type: BUSINESS_TYPE_SCHEMA,
+        radius_meters: RADIUS_SCHEMA,
       },
       required: ["location", "business_type"],
     },
     outputSchema: GET_SITE_INTELLIGENCE_OUTPUT_SCHEMA,
   },
+
   {
-    name:        "compare_sites",
-    description: "Rank two or more candidate sites using public proxy signal scores.",
+    name: "compare_sites",
+    description: [
+      "Rank two or more candidate sites using public proxy signal scores.",
+      "Returns scored profiles for each site in rank order, plus a comparison brief stating which site wins and why.",
+      "All locations are fetched in parallel and cached independently — call once with all candidates",
+      "rather than looping over get_site_intelligence.",
+      "Cold: 4–20s depending on number of sites and location density. Warm cache: under 200ms.",
+    ].join(" "),
+    examples: [
+      { input: { locations: ["Lekki Phase 1, Lagos", "Yaba, Lagos, Nigeria"], business_type: "restaurant", radius_meters: 500 } },
+      { input: { locations: [{ lat: 6.4317, lon: 3.4823 }, { lat: 6.5095, lon: 3.3792 }], business_type: "cafe" } },
+    ],
+    _meta: {
+      surface: "both",
+      queryEligible: true,
+      latencyClass: "slow",
+      pricing: { executeUsd: "0.0010" },
+      rateLimit: {
+        maxRequestsPerMinute: 10,
+        cooldownMs: 3000,
+        maxConcurrency: 2,
+        notes: "Each location triggers a parallel data fetch. For more than 3 sites, expect 15–30s cold.",
+      },
+    },
     inputSchema: {
       type: "object",
       properties: {
-        locations:     { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] }] }, minItems: 2 },
-        business_type: { type: "string", minLength: 1 },
-        radius_meters: { type: "integer", minimum: 100, maximum: 5000, default: 500 },
+        locations: {
+          type: "array",
+          minItems: 2,
+          description:
+            'Two or more candidate sites. Each element is a place name string OR a {"lat": number, "lon": number} object. Never pass bare numbers. Minimum 2 locations.',
+          items: LOCATION_SCHEMA,
+          examples: [
+            ["Lekki Phase 1, Lagos", "Yaba, Lagos, Nigeria"],
+            ["Victoria Island, Lagos", "Yaba, Lagos, Nigeria", "Ikeja, Lagos"],
+          ],
+        },
+        business_type: BUSINESS_TYPE_SCHEMA,
+        radius_meters: RADIUS_SCHEMA,
       },
       required: ["locations", "business_type"],
     },
     outputSchema: COMPARE_SITES_OUTPUT_SCHEMA,
   },
+
   {
-    name:        "get_area_signals",
-    description: "Return normalized public proxy signals for a neighborhood or district before site selection.",
+    name: "get_area_signals",
+    description: [
+      "Raw normalized public proxy signals for a neighbourhood or district — without scoring or recommendation prose.",
+      "Returns: POI counts by category, footway length, crosswalk count, transit stop count, amenity mix,",
+      "population, review activity, and source availability.",
+      "Use this for lightweight neighbourhood research before committing to a specific business type.",
+      "Faster than get_site_intelligence because it skips the scoring and recommendation layer.",
+      "Cold: 2–10s. Warm cache: under 200ms.",
+    ].join(" "),
+    examples: [
+      { input: { location: "Westlands, Nairobi", radius_meters: 500 } },
+      { input: { location: { lat: 5.5560, lon: -0.1969 }, radius_meters: 1000 } },
+    ],
+    _meta: {
+      surface: "both",
+      queryEligible: true,
+      latencyClass: "slow",
+      pricing: { executeUsd: "0.0005" },
+      rateLimit: {
+        maxRequestsPerMinute: 30,
+        cooldownMs: 1000,
+        maxConcurrency: 5,
+        notes: "No scoring layer — faster than get_site_intelligence. Same cache TTLs.",
+      },
+    },
     inputSchema: {
       type: "object",
       properties: {
-        location:      { oneOf: [{ type: "string", minLength: 1 }, { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] }] },
-        radius_meters: { type: "integer", minimum: 100, maximum: 5000, default: 500 },
+        location:      LOCATION_SCHEMA,
+        radius_meters: RADIUS_SCHEMA,
       },
       required: ["location"],
     },
     outputSchema: GET_AREA_SIGNALS_OUTPUT_SCHEMA,
   },
+
   {
-    name:        "get_competitor_density",
-    description: "Return similar venue counts across 250m, 500m, and 1km radius bands from OpenStreetMap.",
+    name: "get_competitor_density",
+    description: [
+      "Similar venue counts across 250m, 500m, and 1km radius bands from OpenStreetMap.",
+      "Returns count_250m, count_500m, count_1000m, and a saturation label (low, moderate, high, saturated).",
+      "Takes ONE location at a time. To compare saturation across two sites,",
+      "call get_competitor_density once per location and compare the count_500m values.",
+      "Cold: 1–5s. Warm cache: under 200ms.",
+    ].join(" "),
+    examples: [
+      { input: { location: "Osu, Accra, Ghana", business_category: "restaurant" } },
+      { input: { location: { lat: 6.4317, lon: 3.4823 }, business_category: "pharmacy" } },
+    ],
+    _meta: {
+      surface: "both",
+      queryEligible: true,
+      latencyClass: "fast",
+      pricing: { executeUsd: "0.0005" },
+      rateLimit: {
+        maxRequestsPerMinute: 40,
+        cooldownMs: 500,
+        maxConcurrency: 8,
+        notes: "Single Overpass query, 1000m radius only. Fastest tool in the set.",
+      },
+    },
     inputSchema: {
       type: "object",
       properties: {
-        location:          { oneOf: [{ type: "string", minLength: 1 }, { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] }] },
-        business_category: { type: "string", minLength: 1 },
+        location: {
+          ...LOCATION_SCHEMA,
+          description:
+            'One location. Pass a place name string OR a {"lat": number, "lon": number} object. Do NOT pass a bare number. This tool takes ONE location at a time — call once per site.',
+        },
+        business_category: {
+          type: "string",
+          minLength: 1,
+          description:
+            'Business category to count competitors for. Examples: "restaurant", "cafe", "gym", "pharmacy", "bakery", "bar".',
+          examples: ["restaurant", "cafe", "gym", "pharmacy", "bakery", "bar", "supermarket"],
+        },
       },
       required: ["location", "business_category"],
     },
@@ -157,7 +323,6 @@ app.use((req, _res, next) => {
   next();
 });
 
-// CTX context middleware — verifies JWT for marketplace requests
 app.use("/mcp", createContextMiddleware() as express.RequestHandler);
 
 // ── SSE sessions ───────────────────────────────────────────────────────────
@@ -182,7 +347,6 @@ app.get("/mcp", async (_req: Request, res: Response) => {
 app.post("/mcp", async (req: Request, res: Response) => {
   const sessionId = req.query["sessionId"] as string | undefined;
 
-  // Route SSE session messages
   if (sessionId) {
     const transport = sessions.get(sessionId);
     if (!transport) { res.status(404).json({ error: "Session not found" }); return; }
@@ -204,10 +368,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
     return;
   }
 
-  if (method === "notifications/initialized") {
-    res.status(204).end();
-    return;
-  }
+  if (method === "notifications/initialized") { res.status(204).end(); return; }
 
   if (method === "notifications/cancelled") {
     log.warn("tool/cancelled", { id });
@@ -278,7 +439,6 @@ app.listen(port, () => {
   log.info("listening", { port, env: process.env["NODE_ENV"] ?? "development" });
 });
 
-// Graceful shutdown
 process.on("SIGTERM", () => {
   log.info("shutdown");
   service.close();
