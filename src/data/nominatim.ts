@@ -20,6 +20,7 @@ interface NominatimResult {
   lat:          string;
   lon:          string;
   display_name: string;
+  class:        string;
   type:         string;
   importance:   number;
 }
@@ -31,31 +32,53 @@ async function geocodeViaNominatim(
   userAgent: string,
   baseUrl:   string,
 ): Promise<{ lat: number; lon: number; label: string } | null> {
-  const params = new URLSearchParams({ q: query, format: "json", limit: "5", addressdetails: "0" });
-  let res = await rateLimitedFetch(`${baseUrl}/search?${params}`, userAgent);
+  // addressdetails=1 returns the full address breakdown (suburb, neighbourhood,
+  // city_district etc.) which lets us derive a correct human-readable label
+  // even when the top result is a POI. e.g. "Yaba, Lagos" resolves to
+  // "Yaba College of Technology" (the only high-importance Nominatim entry
+  // for that query) but its address.suburb = "Yaba" — the correct label.
+  const params = new URLSearchParams({
+    q:              query,
+    format:         "json",
+    limit:          "5",
+    addressdetails: "0",
+  });
 
-  // Nominatim returns 403 when rate-limited. Back off 2 seconds and retry once.
+  let res = await rateLimitedFetch(`${baseUrl}/search?${params}`, userAgent);
   if (res.status === 403) {
     await new Promise(r => setTimeout(r, 2_000));
     res = await rateLimitedFetch(`${baseUrl}/search?${params}`, userAgent);
   }
-
   if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
-  const results = await res.json() as NominatimResult[];
-  const best    = [...results].sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))[0];
-  if (!best) return null;
 
-  const AREA_TYPES = new Set([
+  const results = await res.json() as NominatimResult[];
+
+  const AREA_CLASSES = new Set(["place", "boundary", "landuse"]);
+  const AREA_TYPES   = new Set([
     "administrative", "suburb", "neighbourhood", "quarter",
     "city", "town", "village", "hamlet", "municipality",
     "island", "county", "state", "country", "district",
   ]);
 
-  // If Nominatim returns a specific business/POI (low importance or non-area type),
-  // keep the coordinates but use the original query as the human-readable label.
-  const label = (best.importance > 0.3 || AREA_TYPES.has(best.type))
-    ? (best.display_name.split(",")[0]?.trim() ?? query)
-    : query;
+  function rankResult(r: NominatimResult): number {
+    const classScore = AREA_CLASSES.has(r.class) ? 20 : 0;
+    const typeScore  = AREA_TYPES.has(r.type)    ? 10 : 0;
+    return classScore + typeScore + (r.importance ?? 0);
+  }
+
+  const best = [...results].sort((a, b) => rankResult(b) - rankResult(a))[0];
+  if (!best) return null;
+
+  // Label extraction:
+  // - If Nominatim returned an actual area (suburb, city, neighbourhood, etc.),
+  //   its own display_name first component is correct.
+  // - If Nominatim returned a POI or institution (college, bridge, station...),
+  //   the user's query first term is correct. "Yaba, Lagos" → "Yaba", not
+  //   "Yaba College of Technology" or "Ebute-Metta" (address.suburb).
+  const queryFirstTerm = query.split(",")[0]?.trim() ?? query;
+  const label = AREA_TYPES.has(best.type)
+    ? (best.display_name.split(",")[0]?.trim() ?? queryFirstTerm)
+    : queryFirstTerm;
 
   return {
     lat:   parseFloat(best.lat),

@@ -31,28 +31,34 @@ export async function fetchPopulationSignal(
   }
 
   try {
-    // Use findNearbyPlaceNameJSON with a 20km radius and maxRows=10.
-    // Then pick the entry with the HIGHEST population from all results.
-    // A single wide-radius call avoids breaking early on micro-neighborhoods:
-    // Times Square at 1km finds "Midtown West" (45k) and stops — at 20km the
-    // same call returns New York City (8M) in the same result set.
+    // findNearbyPlaceNameJSON with cities=cities5000 filters out places with
+    // population < 5000 before sorting by distance. Without this, African and
+    // developing-world queries return dozens of unmapped neighborhood stubs with
+    // population=0, burying the actual city (Lagos at 8M, Nairobi at 4M, etc.)
+    // below the maxRows cutoff. cities5000 ensures every result has real data.
+    // 50km radius catches the enclosing metro even from suburban coordinates.
     const params = new URLSearchParams({
-      lat:          String(lat),
-      lng:          String(lon),
-      username:     username,
-      maxRows:      "10",
-      radius:       "20",
-      type:         "JSON",
-      featureClass: "P",
+      lat:      String(lat),
+      lng:      String(lon),
+      username: username,
+      maxRows:  "5",
+      cities:   "cities5000",
+      radius:   "50",
+      type:     "JSON",
     });
     const res  = await fetch(`${GEONAMES_BASE}/findNearbyPlaceNameJSON?${params}`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) throw new Error(`GeoNames HTTP ${res.status}`);
     const json = await res.json() as GeonamesResponse;
     if (json.status) throw new Error(`GeoNames error: ${json.status.message}`);
-    // Pick highest-population result — this is the enclosing city/metro area
+
+    // Nearest city with ≥5000 population — represents the local area this site
+    // belongs to, not the entire metro. Sorting by distance (not population)
+    // means Yaba returns a Yaba-level entry if one exists in GeoNames, not
+    // Lagos (15M) which overstates local density and gives every Lagos location
+    // an identical 100/100 score regardless of actual neighbourhood character.
     const entry = (json.geonames ?? [])
       .filter(g => g.population > 0)
-      .sort((a, b) => b.population - a.population)[0] ?? null;
+      .sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance))[0] ?? null;
 
     if (!entry) {
       return {
