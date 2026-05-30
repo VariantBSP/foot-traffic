@@ -31,24 +31,28 @@ export async function fetchPopulationSignal(
   }
 
   try {
-    // findNearbyPlaceName returns the nearest populated place
+    // Use findNearbyPlaceNameJSON with a 20km radius and maxRows=10.
+    // Then pick the entry with the HIGHEST population from all results.
+    // A single wide-radius call avoids breaking early on micro-neighborhoods:
+    // Times Square at 1km finds "Midtown West" (45k) and stops — at 20km the
+    // same call returns New York City (8M) in the same result set.
     const params = new URLSearchParams({
-      lat:      String(lat),
-      lng:      String(lon),
-      username: username,
-      maxRows:  "5",
-      type:     "JSON",
-      featureClass: "P", // populated places only
+      lat:          String(lat),
+      lng:          String(lon),
+      username:     username,
+      maxRows:      "10",
+      radius:       "20",
+      type:         "JSON",
+      featureClass: "P",
     });
-
     const res  = await fetch(`${GEONAMES_BASE}/findNearbyPlaceNameJSON?${params}`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) throw new Error(`GeoNames HTTP ${res.status}`);
     const json = await res.json() as GeonamesResponse;
-
     if (json.status) throw new Error(`GeoNames error: ${json.status.message}`);
-
-    // Pick the nearest entry with a non-zero population
-    const entry = (json.geonames ?? []).find(g => g.population > 0) ?? json.geonames?.[0];
+    // Pick highest-population result — this is the enclosing city/metro area
+    const entry = (json.geonames ?? [])
+      .filter(g => g.population > 0)
+      .sort((a, b) => b.population - a.population)[0] ?? null;
 
     if (!entry) {
       return {

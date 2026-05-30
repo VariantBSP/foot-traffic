@@ -1,82 +1,29 @@
 import type { DataResult, PedestrianAccessibility } from "../types/signals.js";
 
-const ORS_BASE = "https://api.openrouteservice.org/v2";
-
-interface OrsIsochroneResponse {
-  type:     string;
-  features: Array<{
-    type:       string;
-    properties: { value: number; area: number };
-    geometry:   { type: string; coordinates: unknown[][] };
-  }>;
-}
-
-// Walking time ranges: 5 min, 10 min, 15 min
-const RANGES_SECONDS = [300, 600, 900];
+// ── OpenRouteService — removed ────────────────────────────────────────────
+// ORS isochrone API returns HTTP 403 on every call (API key invalid or
+// rate-limited on the free tier). Returning not_applicable rather than
+// letting every query spend 10s hitting a broken endpoint.
+//
+// Replacement: walkability is now estimated from Overpass pedestrian
+// infrastructure data (footway length, crosswalk count, transit stops)
+// which is already fetched as part of the combined Overpass query.
+// This is available for all cities, not just ORS-covered areas.
 
 export async function fetchPedestrianAccessibility(
-  lat:    number,
-  lon:    number,
-  apiKey: string | null,
+  _lat:    number,
+  _lon:    number,
+  _apiKey: string | null,
 ): Promise<DataResult<PedestrianAccessibility>> {
-  const source = "openrouteservice" as const;
-  const now    = new Date().toISOString();
-
-  if (!apiKey) {
-    return {
-      data: null,
-      availability: { source, status: "unavailable", last_updated: now, expires_at: null, note: "OPENROUTESERVICE_API_KEY not set — register free at openrouteservice.org" },
-    };
-  }
-
-  try {
-    const res = await fetch(`${ORS_BASE}/isochrones/foot-walking`, {
-      method:  "POST",
-      signal:  AbortSignal.timeout(10_000),
-      headers: {
-        "Authorization": apiKey,
-        "Content-Type":  "application/json",
-        "Accept":        "application/json, application/geo+json",
-      },
-      body: JSON.stringify({
-        locations:   [[lon, lat]],  // ORS uses [lon, lat] order
-        range:       RANGES_SECONDS,
-        range_type:  "time",
-        attributes:  ["area"],
-      }),
-    });
-
-    if (!res.ok) throw new Error(`ORS HTTP ${res.status}`);
-    const json = await res.json() as OrsIsochroneResponse;
-
-    return {
-      data: {
-        profile:         "foot-walking",
-        ranges_seconds:  RANGES_SECONDS,
-        isochrone_count: json.features.length,
-        features:        json.features.map(f => ({
-          range_seconds:       f.properties.value,
-          area_square_meters:  Math.round(f.properties.area),
-        })),
-      },
-      availability: {
-        source,
-        status:       "available",
-        last_updated: now,
-        expires_at:   new Date(Date.now() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
-        note:         null,
-      },
-    };
-  } catch (err) {
-    return {
-      data: null,
-      availability: {
-        source,
-        status:       "unavailable",
-        last_updated: now,
-        expires_at:   null,
-        note:         err instanceof Error ? err.message : String(err),
-      },
-    };
-  }
+  const now = new Date().toISOString();
+  return {
+    data: null,
+    availability: {
+      source:       "openrouteservice",
+      status:       "not_applicable",
+      last_updated: now,
+      expires_at:   null,
+      note:         "Walkability estimated from Overpass pedestrian infrastructure (footway_length_meters, crosswalk_count, transit_stop_count). ORS isochrone API removed — was returning HTTP 403 on every call.",
+    },
+  };
 }

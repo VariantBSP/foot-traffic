@@ -1,7 +1,7 @@
 import { COMPOSITE_WEIGHTS, DEFAULT_SCORING_BENCHMARKS } from "./config.js";
 import { scoreCompetitorSaturation } from "./competitors.js";
 import { inferPeakHours } from "./peak-hours.js";
-import { scoreByBenchmark, weightedAverage } from "./normalize.js";
+import { scoreByBenchmark, scoreByLogBenchmark, weightedAverage } from "./normalize.js";
 import type { AvailabilityStatus, NormalizedAreaSignals, SourceAvailability } from "../types/signals.js";
 import type { ScoringBenchmarks, SignalName, SignalScore, SiteSignalScores } from "../types/scoring.js";
 
@@ -154,12 +154,19 @@ function scorePopulationDensity(signals: NormalizedAreaSignals, benchmarks: Scor
     return unavailableSignal("population_density", COMPOSITE_WEIGHTS.population_density, status, sourceAvailability);
   }
 
+  // Population spans many orders of magnitude — use log scale so that a
+  // dense urban neighbourhood (pop 50k) and a global city (pop 8M) both
+  // score meaningfully rather than having the small city score 5/100 on a
+  // linear benchmark. scoreByLogBenchmark gives:
+  //   pop  50,000 → log10(50k)/log10(1M) × 100 ≈ 79
+  //   pop 500,000 → log10(500k)/log10(1M) × 100 ≈ 93
+  //   pop   8,000,000 → clamped to 100
   return {
     signal: "population_density",
-    score: scoreByBenchmark(signals.population.population, benchmarks.populationForMaxScore),
+    score: scoreByLogBenchmark(signals.population.population, benchmarks.populationForMaxScore),
     status,
     weight: COMPOSITE_WEIGHTS.population_density,
-    note: `Based on GeoNames population for ${signals.population.name}.`,
+    note: `Based on GeoNames population for ${signals.population.name} (log-scale benchmark against ${benchmarks.populationForMaxScore.toLocaleString()}).`,
   };
 }
 
